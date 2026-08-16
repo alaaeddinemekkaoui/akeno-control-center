@@ -1,16 +1,187 @@
+using System.Text.Json;
 using Akeno.Host.Models;
 using Akeno.Host.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls("http://0.0.0.0:5077");
+builder.WebHost.UseUrls(Environment.GetEnvironmentVariable("AKENO_URLS") ?? "http://0.0.0.0:5077");
+
 builder.Services.AddSingleton<ControlState>();
-builder.Services.AddSingleton<TelemetryService>();
+builder.Services.AddSingleton<WindowsAudioService>();
+builder.Services.AddSingleton<HardwareMonitorService>();
+builder.Services.AddSingleton<WindowsControlService>();
+builder.Services.AddSingleton<PairingService>();
+
 var app = builder.Build();
+var requirePairing = string.Equals(Environment.GetEnvironmentVariable("AKENO_REQUIRE_PAIRING"), "true", StringComparison.OrdinalIgnoreCase);
+var pairing = app.Services.GetRequiredService<PairingService>();
+
+Console.WriteLine("\nAKENO CONTROL CENTER");
+Console.WriteLine($"LAN URL: http://<YOUR-PC-IP>:5077");
+Console.WriteLine($"Pairing: {(requirePairing ? "REQUIRED" : "optional")}");
+if (requirePairing) Console.WriteLine($"Pairing code: {pairing.PairingCode}");
+Console.WriteLine();
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/api/health", () => Results.Ok(new { ok = true, name = "AKENO Control Center", mode = "LAN Host", time = DateTimeOffset.UtcNow }));
-app.MapGet("/api/state", (ControlState state, TelemetryService telemetry) => Results.Ok(new { controls = state.Snapshot(), telemetry = telemetry.GetSnapshot(), serverTime = DateTimeOffset.UtcNow }));
-app.MapPost("/api/control/{key}", (string key, ControlCommand command, ControlState state) => { var result = state.Apply(key, command); return result.Success ? Results.Ok(result) : Results.BadRequest(result); });
-app.MapPost("/api/action/{key}", (string key, ControlState state) => Results.Ok(state.TriggerAction(key)));
+
+app.MapGet("/api/health", () => Results.Ok(new
+{
+    ok = true,
+    name = "AKENO Control Center",
+    version = "1.0.0-agent",
+    platform = Environment.OSVersion.VersionString,
+    pairingRequired = requirePairing,
+    time = DateTimeOffset.UtcNow
+}));
+
+app.MapGet("/api/state", (ControlState state, WindowsAudioService audio, HardwareMonitorService hardware) =>
+{
+    return Results.Ok(BuildState(state, audio, hardware));
+});
+
+app.MapGet("/api/config", () => Results.Ok(new
+{
+    pairingRequired = requirePairing,
+    isWindows = OperatingSystem.IsWindows(),
+    app = "AKENO Control Center"
+}));
+
+app.MapPost("/api/pair", (PairRequest request, PairingService pairingService) =>
+{
+    try
+    {
+        var token = pairingService.CreateToken(request.Code ?? string.Empty);
+        return Results.Ok(new { token, expiresInDays = 30 });
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Unauthorized();
+    }
+});
+
+app.MapPost("/api/control/{key}", async (HttpContext http, string key, ControlCommand command,
+    ControlState state, WindowsAudioService audio, WindowsControlService windows, PairingService pairingService) =>
+{
+    if (requirePairing && !Authorized(http, pairingService)) return Results.Unauthorized();
+
+    switch (key)
+    {
+        case "master.volume":
+        {
+            var value = ResolveRange(state, key, command);
+            var native = audio.SetOutputVolume(value);
+            state.Apply(key, new ControlCommand { Value = value });
+            return Results.Ok(new { success = true, key, value, native });
+        }
+        case "master.muted":
+        {
+            var value = command.Bool ?? !audio.GetSnapshot().OutputMuted;
+            var native = audio.SetOutputMute(value);
+            return Results.Ok(new { success = true, key, value, native });
+        }
+        case "mic.muted":
+        {
+            var value = command.Bool ?? !audio.GetSnapshot().MicMuted;
+            var native = audio.SetMicMute(value);
+            state.Apply(key, new ControlCommand { Bool = value });
+            return Results.Ok(new { success = true, key, value, native });
+        }
+        case "mic.volume":
+        {
+            var value = Math.Clamp(command.Value ?? 70, 0, 100);
+            var native = audio.SetMicVolume(value);
+            return Results.Ok(new { success = true, key, value, native });
+        }
+        case "display.brightness":
+        {
+            var value = ResolveRange(state, key, command);
+            var result = await windows.SetBrightnessAsync(value);
+            state.Apply(key, new ControlCommand { Value = value });
+            return Results.Ok(new { success = result.Success, key, value, native = result.Success, message = result.Message });
+        }
+        default:
+        {
+            var result = state.Apply(key, command);
+            return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+        }
+    }
+});
+
+app.MapPost("/api/action/{key}", async (HttpContext http, string key, ControlState state,
+    WindowsControlService windows, PairingService pairingService) =>
+{
+    if (requirePairing && !Authorized(http, pairingService)) return Results.Unauthorized();
+
+    if (key.StartsWith("system.", StringComparison.OrdinalIgnoreCase))
+    {
+        var result = await windows.RunActionAsync(key);
+        return Results.Ok(new { success = result.Success, key, message = result.Message });
+    }
+
+    return Results.Ok(state.TriggerAction(key));
+});
+
+// Server-Sent Events endpoint: lightweight live sync for every phone/second screen.
+app.MapGet("/api/events", async (HttpContext http, ControlState state, WindowsAudioService audio,
+    HardwareMonitorService hardware, CancellationToken cancellationToken) =>
+{
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers.Connection = "keep-alive";
+    http.Response.ContentType = "text/event-stream";
+
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        var payload = JsonSerializer.Serialize(BuildState(state, audio, hardware));
+        await http.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+        await http.Response.Body.FlushAsync(cancellationToken);
+        try { await Task.Delay(1000, cancellationToken); }
+        catch (TaskCanceledException) { break; }
+    }
+});
+
 app.MapFallbackToFile("index.html");
 app.Run();
+
+static object BuildState(ControlState state, WindowsAudioService audio, HardwareMonitorService hardware)
+{
+    var a = audio.GetSnapshot();
+    var h = hardware.Read();
+    var controls = state.Snapshot().ToDictionary(k => k.Key, v => v.Value);
+    if (a.OutputAvailable) controls["master.volume"] = a.OutputVolume;
+    controls["master.muted"] = a.OutputMuted;
+    if (a.MicAvailable) controls["mic.muted"] = a.MicMuted;
+    controls["mic.volume"] = a.MicVolume;
+
+    return new
+    {
+        controls,
+        audio = a,
+        telemetry = new
+        {
+            cpu = new { usage = h.CpuUsage, temperature = h.CpuTemperature },
+            gpu = new { usage = h.GpuUsage, temperature = h.GpuTemperature, fps = 0d, name = h.GpuName },
+            ram = new { usage = h.RamUsage },
+            network = new { downMbps = h.DownloadMbps, upMbps = h.UploadMbps, pingMs = 0d },
+            system = new { status = h.Available ? "Live" : "Fallback", host = h.Host, platform = h.Os }
+        },
+        serverTime = DateTimeOffset.UtcNow
+    };
+}
+
+static double ResolveRange(ControlState state, string key, ControlCommand command)
+{
+    var current = state.Snapshot().TryGetValue(key, out var raw) && raw is double d ? d : 50d;
+    var value = command.Value ?? current;
+    if (command.Operation == "increment") value = current + (command.Step ?? 5);
+    if (command.Operation == "decrement") value = current - (command.Step ?? 5);
+    return Math.Clamp(value, 0, 100);
+}
+
+static bool Authorized(HttpContext http, PairingService pairing)
+{
+    var auth = http.Request.Headers.Authorization.ToString();
+    var token = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : null;
+    return pairing.IsValid(token);
+}
+
+public sealed record PairRequest(string? Code);
