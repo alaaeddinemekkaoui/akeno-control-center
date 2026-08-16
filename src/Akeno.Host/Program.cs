@@ -10,6 +10,7 @@ builder.Services.AddSingleton<WindowsAudioService>();
 builder.Services.AddSingleton<HardwareMonitorService>();
 builder.Services.AddSingleton<WindowsControlService>();
 builder.Services.AddSingleton<PairingService>();
+builder.Services.AddSingleton<ComponentCatalogService>();
 
 var app = builder.Build();
 var requirePairing = string.Equals(Environment.GetEnvironmentVariable("AKENO_REQUIRE_PAIRING"), "true", StringComparison.OrdinalIgnoreCase);
@@ -34,9 +35,9 @@ app.MapGet("/api/health", () => Results.Ok(new
     time = DateTimeOffset.UtcNow
 }));
 
-app.MapGet("/api/state", (ControlState state, WindowsAudioService audio, HardwareMonitorService hardware) =>
+app.MapGet("/api/state", (ControlState state, WindowsAudioService audio, HardwareMonitorService hardware, ComponentCatalogService catalog) =>
 {
-    return Results.Ok(BuildState(state, audio, hardware));
+    return Results.Ok(BuildState(state, audio, hardware, catalog));
 });
 
 app.MapGet("/api/config", () => Results.Ok(new
@@ -45,6 +46,52 @@ app.MapGet("/api/config", () => Results.Ok(new
     isWindows = OperatingSystem.IsWindows(),
     app = "AKENO Control Center"
 }));
+
+app.MapGet("/api/components", (ControlState state, WindowsAudioService audio, ComponentCatalogService catalog) =>
+{
+    var audioSnapshot = audio.GetSnapshot();
+    var values = state.Snapshot();
+
+    var items = catalog.List().Select(def =>
+    {
+        values.TryGetValue(def.Id, out var value);
+        var available = true;
+        string? error = null;
+
+        if (def.Id == "display.brightness" && !OperatingSystem.IsWindows())
+        {
+            available = false;
+            error = "Not supported on this platform";
+        }
+        else if (def.Id.StartsWith("master.", StringComparison.Ordinal) && !audioSnapshot.OutputAvailable)
+        {
+            available = false;
+            error = "Output device unavailable";
+        }
+        else if (def.Id.StartsWith("mic.", StringComparison.Ordinal) && !audioSnapshot.MicAvailable)
+        {
+            available = false;
+            error = "Microphone unavailable";
+        }
+
+        return new
+        {
+            id = def.Id,
+            name = def.Name,
+            category = def.Category,
+            type = def.Type,
+            icon = def.Icon,
+            description = def.Description,
+            capabilities = def.Capabilities,
+            views = def.Views,
+            defaultSize = def.DefaultSize,
+            dangerous = def.Dangerous,
+            state = new ComponentRuntimeState(value, available, false, error, DateTimeOffset.UtcNow)
+        };
+    });
+
+    return Results.Ok(items);
+});
 
 app.MapPost("/api/pair", (PairRequest request, PairingService pairingService) =>
 {
@@ -107,10 +154,22 @@ app.MapPost("/api/control/{key}", async (HttpContext http, string key, ControlCo
     }
 });
 
-app.MapPost("/api/action/{key}", async (HttpContext http, string key, ControlState state,
+app.MapPost("/api/action/{key}", async (HttpContext http, string key, ActionCommand? command, ControlState state,
     WindowsControlService windows, PairingService pairingService) =>
 {
     if (requirePairing && !Authorized(http, pairingService)) return Results.Unauthorized();
+
+    var requiresConfirmation = string.Equals(key, "system.restart", StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(key, "system.shutdown", StringComparison.OrdinalIgnoreCase);
+    if (requiresConfirmation && command?.Confirm != true)
+    {
+        return Results.BadRequest(new
+        {
+            success = false,
+            key,
+            error = "Confirmation required for dangerous action."
+        });
+    }
 
     if (key.StartsWith("system.", StringComparison.OrdinalIgnoreCase))
     {
@@ -123,7 +182,7 @@ app.MapPost("/api/action/{key}", async (HttpContext http, string key, ControlSta
 
 // Server-Sent Events endpoint: lightweight live sync for every phone/second screen.
 app.MapGet("/api/events", async (HttpContext http, ControlState state, WindowsAudioService audio,
-    HardwareMonitorService hardware, CancellationToken cancellationToken) =>
+    HardwareMonitorService hardware, ComponentCatalogService catalog, CancellationToken cancellationToken) =>
 {
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers.Connection = "keep-alive";
@@ -131,7 +190,7 @@ app.MapGet("/api/events", async (HttpContext http, ControlState state, WindowsAu
 
     while (!cancellationToken.IsCancellationRequested)
     {
-        var payload = JsonSerializer.Serialize(BuildState(state, audio, hardware));
+        var payload = JsonSerializer.Serialize(BuildState(state, audio, hardware, catalog));
         await http.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
         await http.Response.Body.FlushAsync(cancellationToken);
         try { await Task.Delay(1000, cancellationToken); }
@@ -142,7 +201,7 @@ app.MapGet("/api/events", async (HttpContext http, ControlState state, WindowsAu
 app.MapFallbackToFile("index.html");
 app.Run();
 
-static object BuildState(ControlState state, WindowsAudioService audio, HardwareMonitorService hardware)
+static object BuildState(ControlState state, WindowsAudioService audio, HardwareMonitorService hardware, ComponentCatalogService catalog)
 {
     var a = audio.GetSnapshot();
     var h = hardware.Read();
@@ -152,9 +211,38 @@ static object BuildState(ControlState state, WindowsAudioService audio, Hardware
     if (a.MicAvailable) controls["mic.muted"] = a.MicMuted;
     controls["mic.volume"] = a.MicVolume;
 
+    var timestamp = DateTimeOffset.UtcNow;
+    var components = catalog.List().ToDictionary(
+        d => d.Id,
+        d =>
+        {
+            controls.TryGetValue(d.Id, out var value);
+            var available = true;
+            string? error = null;
+
+            if (d.Id == "display.brightness" && !OperatingSystem.IsWindows())
+            {
+                available = false;
+                error = "Not supported on this platform";
+            }
+            else if (d.Id.StartsWith("master.", StringComparison.Ordinal) && !a.OutputAvailable)
+            {
+                available = false;
+                error = "Output device unavailable";
+            }
+            else if (d.Id.StartsWith("mic.", StringComparison.Ordinal) && !a.MicAvailable)
+            {
+                available = false;
+                error = "Microphone unavailable";
+            }
+
+            return new ComponentRuntimeState(value, available, false, error, timestamp);
+        });
+
     return new
     {
         controls,
+        components,
         audio = a,
         telemetry = new
         {
@@ -164,7 +252,7 @@ static object BuildState(ControlState state, WindowsAudioService audio, Hardware
             network = new { downMbps = h.DownloadMbps, upMbps = h.UploadMbps, pingMs = 0d },
             system = new { status = h.Available ? "Live" : "Fallback", host = h.Host, platform = h.Os }
         },
-        serverTime = DateTimeOffset.UtcNow
+        serverTime = timestamp
     };
 }
 
