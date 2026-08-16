@@ -32,10 +32,12 @@ A curated AKENO monitoring view for PC performance, audio, network and stream st
 - Widget gallery
 - Range values as sliders or +/- buttons
 - Toggles and action tiles
+- Shared component catalog from host (`/api/components`)
 - Shared state with Dashboard
 - Browser-local layout persistence
 - Responsive iPhone layout
 - PWA support
+- Pairing token support in UI when host pairing is enabled
 
 The architectural rule is: **function != widget**. `master.volume` is one function; slider, +/- buttons and compact value cards are different views of that same function.
 
@@ -81,6 +83,12 @@ $env:AKENO_REQUIRE_PAIRING="true"
 
 The host prints a six-digit pairing code. The pairing API exchanges that code for a temporary token. Before exposing the PC host outside your LAN, pairing/authentication must be enabled and the host should be placed behind a secure VPN/tunnel rather than directly port-forwarded.
 
+When pairing is enabled, the web UI shows a lock button and stores the paired token locally for future control requests.
+
+## Action safety
+
+`system.restart` and `system.shutdown` require explicit confirmation in the API payload and in the web UI to reduce accidental triggers.
+
 ## Public web demo
 
 GitHub Pages deploys the static interface from `src/Akeno.Host/wwwroot`. The public version demonstrates Dashboard and Deck UI but cannot directly control your private PC because GitHub Pages is static hosting.
@@ -107,6 +115,17 @@ src/Akeno.Host/
   ci.yml
   pages.yml
 ```
+
+## Core API surface
+
+- `GET /api/health`
+- `GET /api/config`
+- `GET /api/state`
+- `GET /api/components`
+- `GET /api/events` (SSE real-time sync)
+- `POST /api/pair`
+- `POST /api/control/{componentId}`
+- `POST /api/action/{actionId}`
 
 ## Brand direction
 
