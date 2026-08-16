@@ -1,0 +1,9 @@
+{
+  "name": "AKENO Control Center",
+  "short_name": "AKENO",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#070707",
+  "description": "AKENO Dashboard and customizable Deck control surface."
+}
