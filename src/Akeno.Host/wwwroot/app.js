@@ -1,14 +1,472 @@
-const A={async state(){try{let r=await fetch('api/state',{cache:'no-store'});if(!r.ok)throw 0;return await r.json()}catch{return null}},async control(k,b){try{return await(await fetch(`api/control/${encodeURIComponent(k)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}catch{}},async action(k){try{return await(await fetch(`api/action/${encodeURIComponent(k)}`,{method:'POST'})).json()}catch{}}};
-const base={pages:[{id:'home',name:'Home',tiles:[['mic','mic.muted','toggle','1x1','Microphone'],['live','stream.live','toggle','1x1','OBS'],['vol','master.volume','slider','2x1','Master Volume'],['cpu','cpu','metric','1x1','CPU'],['gpu','gpu','metric','1x1','GPU'],['bright','display.brightness','plusminus','2x1','Brightness'],['tw','twitch','status','2x2','Twitch'],['media','media','player','2x2','Now Playing']]},{id:'stream',name:'Stream',tiles:[['st','stream.live','status','2x2','Stream'],['sm','mic.muted','toggle','1x1','Mic'],['clip','clip','action','1x1','Clip 30s'],['sv','master.volume','slider','2x1','Stream Volume'],['brb','obs.brb','action','1x1','BRB'],['gp','obs.gameplay','action','1x1','Gameplay']]},{id:'audio',name:'Audio',tiles:[['av','master.volume','slider','4x1','Master Volume'],['apm','master.volume','plusminus','2x1','Master ±'],['am','mic.muted','toggle','1x1','Mute Mic']]}]};base.pages.forEach(p=>p.tiles=p.tiles.map(x=>({id:x[0],component:x[1],view:x[2],size:x[3],title:x[4]})));
-const S={mode:'dashboard',edit:false,page:'home',online:false,controls:{'master.volume':72,'display.brightness':68,'mic.muted':false,'stream.live':false,'media.playing':true},telemetry:{cpu:{usage:34,temperature:52},gpu:{usage:67,temperature:62,fps:144},ram:{usage:42},network:{downMbps:836,pingMs:12},system:{status:'Stable',host:'AKENO-PC'}},layout:load()};
-function load(){try{return JSON.parse(localStorage.getItem('akeno.layout'))||structuredClone(base)}catch{return structuredClone(base)}}function save(){localStorage.setItem('akeno.layout',JSON.stringify(S.layout))}function page(){return S.layout.pages.find(x=>x.id===S.page)||S.layout.pages[0]}function toast(m){let e=document.querySelector('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),1100)}function clamp(v){return Math.max(0,Math.min(100,+v))}
-async function range(k,v){S.controls[k]=clamp(v);render();await A.control(k,{value:S.controls[k]})}async function adj(k,d){S.controls[k]=clamp((S.controls[k]||0)+d);render();await A.control(k,{operation:d>0?'increment':'decrement',step:Math.abs(d)})}async function tog(k){S.controls[k]=!S.controls[k];render();await A.control(k,{bool:S.controls[k]})}async function act(k){toast(k+' triggered');await A.action(k)}
-function metric(title,val,sub,size='1x1'){return `<div class="tile s${size}"><div class="eyebrow">${title}</div><div class="metric">${val}</div><div class="sub">${sub||''}</div></div>`}
-function dashboard(){let t=S.telemetry,c=S.controls;return `<div class="panel"><div class="head"><div><div class="title">SYSTEM DASHBOARD</div><div class="sub">Monitor everything. Control anything.</div></div><div class="sub">${S.online?'● LAN HOST':'○ STATIC DEMO'}</div></div><div class="grid dashboard"><div class="tile hero"><div class="row"><div><div class="eyebrow">AKENO SYSTEM</div><div class="metric">${t.system.status}</div><div class="sub">${t.system.host}</div></div><div class="moon"></div></div><div class="progress"><i style="width:${t.gpu.usage}%"></i></div></div>${metric('CPU',t.cpu.usage+'%',t.cpu.temperature+'°C')}${metric('GPU',t.gpu.usage+'%',t.gpu.temperature+'°C')}${metric('FPS',t.gpu.fps,'Live')}${metric('RAM',t.ram.usage+'%','Memory')}<div class="tile s2x1"><div class="row"><div><div class="eyebrow">Master Volume</div><div class="metric">${Math.round(c['master.volume'])}%</div></div><span>🔊</span></div><input class="range" data-range="master.volume" type="range" min="0" max="100" value="${c['master.volume']}"></div><div class="tile s2x1 ${!c['mic.muted']?'active':''}"><div class="eyebrow">Microphone</div><div class="metric">${c['mic.muted']?'MUTED':'ACTIVE'}</div><div class="sub">Tap to toggle</div><button class="full" data-toggle="mic.muted"></button></div>${metric('Network',t.network.downMbps,'Mbps','2x1')}${metric('Ping',t.network.pingMs,'ms')}<div class="tile s1x1 ${c['stream.live']?'active':''}"><div class="eyebrow">Stream</div><div class="metric">${c['stream.live']?'LIVE':'OFF'}</div><button class="full" data-toggle="stream.live"></button></div></div></div>`}
-function widget(x){let c=S.controls,t=S.telemetry,b='';if(x.component==='cpu')b=`<div class="eyebrow">${x.title}</div><div class="metric">${t.cpu.usage}%</div><div class="sub">${t.cpu.temperature}°C</div>`;else if(x.component==='gpu')b=`<div class="eyebrow">${x.title}</div><div class="metric">${t.gpu.usage}%</div><div class="sub">${t.gpu.temperature}°C • ${t.gpu.fps} FPS</div>`;else if(x.component==='twitch')b=`<div class="row"><div><div class="eyebrow">Twitch</div><div class="metric">${c['stream.live']?'LIVE':'OFFLINE'}</div></div><span class="badge"><span class="dot"></span>${c['stream.live']?'184 viewers':'Ready'}</span></div><div class="sub">akeno_ma</div><div class="progress"><i style="width:${c['stream.live']?74:8}%"></i></div>`;else if(x.component==='media')b=`<div class="eyebrow">${x.title}</div><div class="metric">Beyond the Dawn</div><div class="sub">AKENO Radio</div><div class="pmrow"><button class="pm" data-action="media.prev">◀</button><button class="pm" data-toggle="media.playing">${c['media.playing']?'Ⅱ':'▶'}</button><button class="pm" data-action="media.next">▶</button></div>`;else if(x.view==='slider'){let v=Math.round(c[x.component]||0);b=`<div class="row"><div><div class="eyebrow">${x.title}</div><div class="metric">${v}%</div></div><span>◉</span></div><input class="range" data-range="${x.component}" type="range" min="0" max="100" value="${v}">`}else if(x.view==='plusminus'){let v=Math.round(c[x.component]||0);b=`<div class="row"><div><div class="eyebrow">${x.title}</div><div class="metric">${v}%</div></div><span>◐</span></div><div class="pmrow"><button class="pm" data-adj="${x.component}" data-d="-5">−</button><button class="pm" data-adj="${x.component}" data-d="5">＋</button></div>`}else if(x.view==='toggle'){let v=!!c[x.component],txt=x.component==='mic.muted'?(v?'OFF':'ON'):(v?'ON':'OFF');b=`<div class="eyebrow">${x.title}</div><div class="metric">${txt}</div><div class="sub">Tap to toggle</div><button class="full" data-toggle="${x.component}"></button>`}else if(x.view==='status'){let v=!!c['stream.live'];b=`<div class="eyebrow">${x.title}</div><div class="metric">${v?'LIVE':'OFFLINE'}</div><div class="sub">${v?'01:24:32 • 184 viewers':'Tap to toggle'}</div><button class="full" data-toggle="stream.live"></button>`}else b=`<div class="eyebrow">Action</div><div class="metric">${x.title}</div><div class="sub">Tap to run</div><button class="full" data-action="${x.component}"></button>`;let active=(x.component==='stream.live'&&c['stream.live'])||(x.component==='mic.muted'&&!c['mic.muted']);return `<div class="tile s${x.size} ${active?'active':''}" draggable="${S.edit}" data-tile="${x.id}">${b}<div class="menu"><button data-resize="${x.id}">↔</button><button data-delete="${x.id}">×</button></div></div>`}
-function deck(){let p=page();return `<div class="panel ${S.edit?'editing':''}"><div class="head"><div><div class="title">DECK MODE</div><div class="sub">${S.edit?'Drag, resize and customize':'Your screen. Your controls.'}</div></div><button class="add" style="padding:8px 12px" data-gallery>＋ Add</button></div><div class="pages">${S.layout.pages.map(p=>`<button class="pill ${p.id===S.page?'on':''}" data-page="${p.id}">${p.name}</button>`).join('')}<button class="pill" data-new>＋</button></div><div class="grid">${p.tiles.map(widget).join('')}</div></div>`}
-const catalog=[['Master Volume','master.volume','slider','2x1','Range • Slider'],['Master ±','master.volume','plusminus','2x1','Range • Buttons'],['Brightness','display.brightness','slider','2x1','Range • Slider'],['Brightness ±','display.brightness','plusminus','2x1','Range • Buttons'],['Microphone','mic.muted','toggle','1x1','Toggle'],['Stream Status','stream.live','status','2x2','Status'],['CPU','cpu','metric','1x1','Telemetry'],['GPU','gpu','metric','1x1','Telemetry'],['Twitch','twitch','status','2x2','Streaming'],['Media Player','media','player','2x2','Media'],['Save Clip','clip','action','1x1','Action'],['Gameplay Scene','obs.gameplay','action','1x1','OBS']];function gallery(){return `<div class="gallery" id="gallery"><div class="sheet"><div class="head"><div><b>Widget Gallery</b><div class="sub">One function, multiple views.</div></div><button class="icon" data-close>×</button></div><div class="items">${catalog.map(x=>`<div class="item" data-add='${JSON.stringify({title:x[0],component:x[1],view:x[2],size:x[3]})}'><b>${x[0]}</b><small>${x[4]} • ${x[3]}</small></div>`).join('')}</div></div></div>`}
-function render(){document.querySelector('#app').innerHTML=`<div class="shell"><div class="top"><div class="brand"><div class="logo">A</div><div><div class="name">AKENO CONTROL CENTER</div><div class="tag">BEYOND THE DAWN • NEO-SAMURAI NOIR</div></div></div>${S.mode==='deck'?`<button class="icon ${S.edit?'on':''}" data-edit>✦</button>`:''}</div><div class="tabs"><button class="tab ${S.mode==='dashboard'?'on':''}" data-mode="dashboard">Dashboard</button><button class="tab ${S.mode==='deck'?'on':''}" data-mode="deck">Deck</button></div>${S.mode==='dashboard'?dashboard():deck()}</div>${gallery()}`;bind()}
-function bind(){document.querySelectorAll('[data-mode]').forEach(e=>e.onclick=()=>{S.mode=e.dataset.mode;render()});document.querySelector('[data-edit]')?.addEventListener('click',()=>{S.edit=!S.edit;render()});document.querySelectorAll('[data-page]').forEach(e=>e.onclick=()=>{S.page=e.dataset.page;render()});document.querySelector('[data-new]')?.addEventListener('click',()=>{let id='p'+Date.now();S.layout.pages.push({id,name:'Page '+(S.layout.pages.length+1),tiles:[]});S.page=id;save();render()});document.querySelectorAll('[data-range]').forEach(e=>e.oninput=()=>range(e.dataset.range,e.value));document.querySelectorAll('[data-adj]').forEach(e=>e.onclick=()=>adj(e.dataset.adj,+e.dataset.d));document.querySelectorAll('[data-toggle]').forEach(e=>e.onclick=x=>{x.stopPropagation();tog(e.dataset.toggle)});document.querySelectorAll('[data-action]').forEach(e=>e.onclick=x=>{x.stopPropagation();act(e.dataset.action)});document.querySelector('[data-gallery]')?.addEventListener('click',()=>document.querySelector('#gallery').classList.add('open'));document.querySelector('[data-close]')?.addEventListener('click',()=>document.querySelector('#gallery').classList.remove('open'));document.querySelectorAll('[data-add]').forEach(e=>e.onclick=()=>{let x=JSON.parse(e.dataset.add);page().tiles.push({id:Math.random().toString(36).slice(2,9),...x});save();document.querySelector('#gallery').classList.remove('open');render()});document.querySelectorAll('[data-delete]').forEach(e=>e.onclick=x=>{x.stopPropagation();page().tiles=page().tiles.filter(t=>t.id!==e.dataset.delete);save();render()});document.querySelectorAll('[data-resize]').forEach(e=>e.onclick=x=>{x.stopPropagation();let t=page().tiles.find(t=>t.id===e.dataset.resize),z=['1x1','2x1','2x2','4x1','4x2'];t.size=z[(z.indexOf(t.size)+1)%z.length];save();render()});drag()}
-function drag(){if(!S.edit)return;let from;document.querySelectorAll('[data-tile]').forEach(e=>{e.ondragstart=()=>{from=e.dataset.tile;e.classList.add('drag')};e.ondragend=()=>{e.classList.remove('drag');document.querySelectorAll('.over').forEach(x=>x.classList.remove('over'))};e.ondragover=x=>{x.preventDefault();if(e.dataset.tile!==from)e.classList.add('over')};e.ondragleave=()=>e.classList.remove('over');e.ondrop=x=>{x.preventDefault();let to=e.dataset.tile,a=page().tiles,i=a.findIndex(x=>x.id===from),j=a.findIndex(x=>x.id===to);if(i<0||j<0||i===j)return;let [m]=a.splice(i,1);a.splice(j,0,m);save();render()}})}
-async function sync(){let d=await A.state();if(d){S.online=true;Object.assign(S.controls,d.controls||{});S.telemetry=d.telemetry||S.telemetry}else{S.online=false;S.telemetry.cpu.usage=Math.max(5,Math.min(95,S.telemetry.cpu.usage+Math.round((Math.random()-.5)*7)));S.telemetry.gpu.usage=Math.max(5,Math.min(99,S.telemetry.gpu.usage+Math.round((Math.random()-.5)*9)))}render()}render();sync();setInterval(sync,2200);if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+const STORAGE_LAYOUT = 'akeno.layout';
+const STORAGE_TOKEN = 'akeno.pair.token';
+
+const base = {
+  pages: [
+    {
+      id: 'home',
+      name: 'Home',
+      tiles: [
+        ['mic', 'mic.muted', 'toggle', '1x1', 'Microphone'],
+        ['live', 'stream.live', 'toggle', '1x1', 'OBS'],
+        ['vol', 'master.volume', 'slider', '2x1', 'Master Volume'],
+        ['cpu', 'cpu', 'metric', '1x1', 'CPU'],
+        ['gpu', 'gpu', 'metric', '1x1', 'GPU'],
+        ['bright', 'display.brightness', 'plusminus', '2x1', 'Brightness'],
+        ['lock', 'system.lock', 'action', '1x1', 'Lock PC'],
+        ['shutdown', 'system.shutdown', 'action', '1x1', 'Shutdown']
+      ]
+    },
+    {
+      id: 'audio',
+      name: 'Audio',
+      tiles: [
+        ['av', 'master.volume', 'slider', '4x1', 'Master Volume'],
+        ['apm', 'master.volume', 'plusminus', '2x1', 'Master ±'],
+        ['am', 'mic.muted', 'toggle', '1x1', 'Mute Mic']
+      ]
+    }
+  ]
+};
+base.pages.forEach((p) => {
+  p.tiles = p.tiles.map((x) => ({ id: x[0], component: x[1], view: x[2], size: x[3], title: x[4] }));
+});
+
+const S = {
+  mode: 'dashboard',
+  edit: false,
+  page: 'home',
+  online: false,
+  pairingRequired: false,
+  token: localStorage.getItem(STORAGE_TOKEN) || '',
+  controls: {
+    'master.volume': 72,
+    'display.brightness': 68,
+    'mic.muted': false,
+    'stream.live': false,
+    'media.playing': true
+  },
+  components: {},
+  componentDefs: [],
+  telemetry: {
+    cpu: { usage: 34, temperature: 52 },
+    gpu: { usage: 67, temperature: 62, fps: 144 },
+    ram: { usage: 42 },
+    network: { downMbps: 0, pingMs: 12 },
+    system: { status: 'Static Demo', host: 'AKENO-PC' }
+  },
+  layout: loadLayout()
+};
+
+function authHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (S.token) headers.Authorization = 'Bearer ' + S.token;
+  return headers;
+}
+
+const A = {
+  async config() {
+    try {
+      const r = await fetch('api/config', { cache: 'no-store' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  },
+  async state() {
+    try {
+      const r = await fetch('api/state', { cache: 'no-store' });
+      if (!r.ok) throw new Error('state');
+      return await r.json();
+    } catch {
+      return null;
+    }
+  },
+  async components() {
+    try {
+      const r = await fetch('api/components', { cache: 'no-store' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  },
+  async pair(code) {
+    try {
+      const r = await fetch('api/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  },
+  async control(key, body) {
+    try {
+      const r = await fetch(`api/control/${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(body)
+      });
+      if (r.status === 401) {
+        toast('Pairing required');
+        return null;
+      }
+      return await r.json();
+    } catch {
+      return null;
+    }
+  },
+  async action(key, body = {}) {
+    try {
+      const r = await fetch(`api/action/${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(body)
+      });
+      if (r.status === 401) {
+        toast('Pairing required');
+        return null;
+      }
+      return await r.json();
+    } catch {
+      return null;
+    }
+  }
+};
+
+function loadLayout() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_LAYOUT)) || structuredClone(base);
+  } catch {
+    return structuredClone(base);
+  }
+}
+
+function saveLayout() {
+  localStorage.setItem(STORAGE_LAYOUT, JSON.stringify(S.layout));
+}
+
+function page() {
+  return S.layout.pages.find((x) => x.id === S.page) || S.layout.pages[0];
+}
+
+function toast(message) {
+  const el = document.querySelector('#toast');
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 1200);
+}
+
+function clamp(v) {
+  return Math.max(0, Math.min(100, +v || 0));
+}
+
+function compState(id) {
+  return S.components[id] || { available: true };
+}
+
+function isAvailable(id) {
+  return compState(id).available !== false;
+}
+
+function disabledClass(id) {
+  return isAvailable(id) ? '' : ' disabled';
+}
+
+async function range(key, value) {
+  if (!isAvailable(key)) return;
+  S.controls[key] = clamp(value);
+  render();
+  await A.control(key, { value: S.controls[key] });
+}
+
+async function adj(key, delta) {
+  if (!isAvailable(key)) return;
+  S.controls[key] = clamp((S.controls[key] || 0) + delta);
+  render();
+  await A.control(key, { operation: delta > 0 ? 'increment' : 'decrement', step: Math.abs(delta) });
+}
+
+async function tog(key) {
+  if (!isAvailable(key)) return;
+  S.controls[key] = !S.controls[key];
+  render();
+  await A.control(key, { bool: S.controls[key] });
+}
+
+async function act(key) {
+  const dangerous = key === 'system.restart' || key === 'system.shutdown';
+  if (dangerous) {
+    const ok = window.confirm(`${key.replace('system.', '').toUpperCase()} requires confirmation. Continue?`);
+    if (!ok) return;
+    const response = await A.action(key, { confirm: true });
+    toast(response?.success ? 'Action executed' : 'Action blocked');
+    return;
+  }
+
+  const response = await A.action(key);
+  toast(response?.success === false ? 'Action failed' : `${key} triggered`);
+}
+
+function metric(title, val, sub, size = '1x1') {
+  return `<div class="tile s${size}"><div class="eyebrow">${title}</div><div class="metric">${val}</div><div class="sub">${sub || ''}</div></div>`;
+}
+
+function dashboard() {
+  const t = S.telemetry;
+  const c = S.controls;
+  return `<div class="panel"><div class="head"><div><div class="title">SYSTEM DASHBOARD</div><div class="sub">Monitor everything. Control anything.</div></div><div class="sub">${S.online ? '● LAN HOST' : '○ STATIC DEMO'}</div></div><div class="grid dashboard"><div class="tile hero"><div class="row"><div><div class="eyebrow">AKENO SYSTEM</div><div class="metric">${t.system.status}</div><div class="sub">${t.system.host}</div></div><div class="moon"></div></div><div class="progress"><i style="width:${t.gpu.usage}%"></i></div></div>${metric('CPU', `${t.cpu.usage}%`, `${t.cpu.temperature}°C`)}${metric('GPU', `${t.gpu.usage}%`, `${t.gpu.temperature}°C`)}${metric('FPS', t.gpu.fps || '--', 'Live')}${metric('RAM', `${t.ram.usage}%`, 'Memory')}<div class="tile s2x1${disabledClass('master.volume')}"><div class="row"><div><div class="eyebrow">Master Volume</div><div class="metric">${Math.round(c['master.volume'] || 0)}%</div></div><span>◉</span></div><input class="range" data-range="master.volume" type="range" min="0" max="100" value="${c['master.volume'] || 0}" ${isAvailable('master.volume') ? '' : 'disabled'}><div class="sub">${compState('master.volume').error || ''}</div></div><div class="tile s2x1 ${!c['mic.muted'] ? 'active' : ''}${disabledClass('mic.muted')}"><div class="eyebrow">Microphone</div><div class="metric">${c['mic.muted'] ? 'MUTED' : 'ACTIVE'}</div><div class="sub">${compState('mic.muted').error || 'Tap to toggle'}</div><button class="full" data-toggle="mic.muted"></button></div>${metric('Network', t.network.downMbps || '--', 'Mbps', '2x1')}${metric('Ping', t.network.pingMs || '--', 'ms')}<div class="tile s1x1 ${c['stream.live'] ? 'active' : ''}"><div class="eyebrow">Stream</div><div class="metric">${c['stream.live'] ? 'LIVE' : 'OFF'}</div><button class="full" data-toggle="stream.live"></button></div></div></div>`;
+}
+
+function widget(tile) {
+  const c = S.controls;
+  const t = S.telemetry;
+  let body = '';
+
+  if (tile.component === 'cpu') {
+    body = `<div class="eyebrow">${tile.title}</div><div class="metric">${t.cpu.usage}%</div><div class="sub">${t.cpu.temperature}°C</div>`;
+  } else if (tile.component === 'gpu') {
+    body = `<div class="eyebrow">${tile.title}</div><div class="metric">${t.gpu.usage}%</div><div class="sub">${t.gpu.temperature}°C • ${t.gpu.fps || '--'} FPS</div>`;
+  } else if (tile.view === 'slider') {
+    const v = Math.round(c[tile.component] || 0);
+    body = `<div class="row"><div><div class="eyebrow">${tile.title}</div><div class="metric">${v}%</div></div><span>◉</span></div><input class="range" data-range="${tile.component}" type="range" min="0" max="100" value="${v}" ${isAvailable(tile.component) ? '' : 'disabled'}><div class="sub">${compState(tile.component).error || ''}</div>`;
+  } else if (tile.view === 'plusminus') {
+    const v = Math.round(c[tile.component] || 0);
+    body = `<div class="row"><div><div class="eyebrow">${tile.title}</div><div class="metric">${v}%</div></div><span>◐</span></div><div class="pmrow"><button class="pm" data-adj="${tile.component}" data-d="-5" ${isAvailable(tile.component) ? '' : 'disabled'}>−</button><button class="pm" data-adj="${tile.component}" data-d="5" ${isAvailable(tile.component) ? '' : 'disabled'}>＋</button></div><div class="sub">${compState(tile.component).error || ''}</div>`;
+  } else if (tile.view === 'toggle') {
+    const v = !!c[tile.component];
+    const txt = tile.component === 'mic.muted' ? (v ? 'OFF' : 'ON') : (v ? 'ON' : 'OFF');
+    body = `<div class="eyebrow">${tile.title}</div><div class="metric">${txt}</div><div class="sub">${compState(tile.component).error || 'Tap to toggle'}</div><button class="full" data-toggle="${tile.component}"></button>`;
+  } else {
+    body = `<div class="eyebrow">Action</div><div class="metric">${tile.title}</div><div class="sub">Tap to run</div><button class="full" data-action="${tile.component}"></button>`;
+  }
+
+  const active = (tile.component === 'stream.live' && c['stream.live']) || (tile.component === 'mic.muted' && !c['mic.muted']);
+  return `<div class="tile s${tile.size} ${active ? 'active' : ''}${disabledClass(tile.component)}" draggable="${S.edit}" data-tile="${tile.id}">${body}<div class="menu"><button data-resize="${tile.id}">↔</button><button data-delete="${tile.id}">×</button></div></div>`;
+}
+
+function deck() {
+  const p = page();
+  return `<div class="panel ${S.edit ? 'editing' : ''}"><div class="head"><div><div class="title">DECK MODE</div><div class="sub">${S.edit ? 'Drag, resize and customize' : 'Your screen. Your controls.'}</div></div><button class="add" style="padding:8px 12px" data-gallery>＋ Add</button></div><div class="pages">${S.layout.pages.map((x) => `<button class="pill ${x.id === S.page ? 'on' : ''}" data-page="${x.id}">${x.name}</button>`).join('')}<button class="pill" data-new>＋</button></div><div class="grid">${p.tiles.map(widget).join('')}</div></div>`;
+}
+
+function fallbackCatalog() {
+  return [
+    { title: 'Master Volume', component: 'master.volume', view: 'slider', size: '2x1', info: 'Range • Slider' },
+    { title: 'Master ±', component: 'master.volume', view: 'plusminus', size: '2x1', info: 'Range • Buttons' },
+    { title: 'Brightness', component: 'display.brightness', view: 'slider', size: '2x1', info: 'Range • Slider' },
+    { title: 'Brightness ±', component: 'display.brightness', view: 'plusminus', size: '2x1', info: 'Range • Buttons' },
+    { title: 'Microphone', component: 'mic.muted', view: 'toggle', size: '1x1', info: 'Toggle' },
+    { title: 'Lock PC', component: 'system.lock', view: 'action', size: '1x1', info: 'Action' },
+    { title: 'Restart PC', component: 'system.restart', view: 'action', size: '1x1', info: 'Dangerous Action' },
+    { title: 'Shutdown PC', component: 'system.shutdown', view: 'action', size: '1x1', info: 'Dangerous Action' },
+    { title: 'CPU', component: 'cpu', view: 'metric', size: '1x1', info: 'Telemetry' },
+    { title: 'GPU', component: 'gpu', view: 'metric', size: '1x1', info: 'Telemetry' }
+  ];
+}
+
+function gallery() {
+  const source = S.componentDefs.length
+    ? S.componentDefs.flatMap((c) => c.views.map((v) => ({
+      title: c.name,
+      component: c.id,
+      view: v === 'status' ? 'toggle' : v === 'value' ? 'slider' : v,
+      size: c.defaultSize || '1x1',
+      info: `${c.category} • ${v}`
+    })))
+    : fallbackCatalog();
+
+  return `<div class="gallery" id="gallery"><div class="sheet"><div class="head"><div><b>Widget Gallery</b><div class="sub">One function, multiple views.</div></div><button class="icon" data-close>×</button></div><div class="items">${source.map((x) => `<div class="item" data-add='${JSON.stringify({ title: x.title, component: x.component, view: x.view, size: x.size })}'><b>${x.title}</b><small>${x.info} • ${x.size}</small></div>`).join('')}</div></div></div>`;
+}
+
+function topActions() {
+  if (!S.pairingRequired) return '';
+  if (S.token) return `<button class="icon on" title="Paired">✓</button>`;
+  return `<button class="icon" data-pair title="Pair device">🔐</button>`;
+}
+
+function render() {
+  document.querySelector('#app').innerHTML = `<div class="shell"><div class="top"><div class="brand"><div class="logo">A</div><div><div class="name">AKENO CONTROL CENTER</div><div class="tag">BEYOND THE DAWN • NEO-SAMURAI NOIR</div></div></div><div style="display:flex;gap:8px">${topActions()}${S.mode === 'deck' ? `<button class="icon ${S.edit ? 'on' : ''}" data-edit>✦</button>` : ''}</div></div><div class="tabs"><button class="tab ${S.mode === 'dashboard' ? 'on' : ''}" data-mode="dashboard">Dashboard</button><button class="tab ${S.mode === 'deck' ? 'on' : ''}" data-mode="deck">Deck</button></div>${S.mode === 'dashboard' ? dashboard() : deck()}</div>${gallery()}`;
+  bind();
+}
+
+function bind() {
+  document.querySelectorAll('[data-mode]').forEach((e) => {
+    e.onclick = () => {
+      S.mode = e.dataset.mode;
+      render();
+    };
+  });
+  document.querySelector('[data-edit]')?.addEventListener('click', () => {
+    S.edit = !S.edit;
+    render();
+  });
+  document.querySelector('[data-pair]')?.addEventListener('click', pairDevice);
+  document.querySelectorAll('[data-page]').forEach((e) => {
+    e.onclick = () => {
+      S.page = e.dataset.page;
+      render();
+    };
+  });
+  document.querySelector('[data-new]')?.addEventListener('click', () => {
+    const id = `p${Date.now()}`;
+    S.layout.pages.push({ id, name: `Page ${S.layout.pages.length + 1}`, tiles: [] });
+    S.page = id;
+    saveLayout();
+    render();
+  });
+  document.querySelectorAll('[data-range]').forEach((e) => (e.oninput = () => range(e.dataset.range, e.value)));
+  document.querySelectorAll('[data-adj]').forEach((e) => (e.onclick = () => adj(e.dataset.adj, +e.dataset.d)));
+  document.querySelectorAll('[data-toggle]').forEach((e) => (e.onclick = (x) => {
+    x.stopPropagation();
+    tog(e.dataset.toggle);
+  }));
+  document.querySelectorAll('[data-action]').forEach((e) => (e.onclick = (x) => {
+    x.stopPropagation();
+    act(e.dataset.action);
+  }));
+  document.querySelector('[data-gallery]')?.addEventListener('click', () => document.querySelector('#gallery').classList.add('open'));
+  document.querySelector('[data-close]')?.addEventListener('click', () => document.querySelector('#gallery').classList.remove('open'));
+  document.querySelectorAll('[data-add]').forEach((e) => (e.onclick = () => {
+    const x = JSON.parse(e.dataset.add);
+    page().tiles.push({ id: Math.random().toString(36).slice(2, 9), ...x });
+    saveLayout();
+    document.querySelector('#gallery').classList.remove('open');
+    render();
+  }));
+  document.querySelectorAll('[data-delete]').forEach((e) => (e.onclick = (x) => {
+    x.stopPropagation();
+    page().tiles = page().tiles.filter((t) => t.id !== e.dataset.delete);
+    saveLayout();
+    render();
+  }));
+  document.querySelectorAll('[data-resize]').forEach((e) => (e.onclick = (x) => {
+    x.stopPropagation();
+    const tile = page().tiles.find((t) => t.id === e.dataset.resize);
+    const sizes = ['1x1', '2x1', '2x2', '4x1', '4x2'];
+    tile.size = sizes[(sizes.indexOf(tile.size) + 1) % sizes.length];
+    saveLayout();
+    render();
+  }));
+  drag();
+}
+
+function drag() {
+  if (!S.edit) return;
+  let from;
+  document.querySelectorAll('[data-tile]').forEach((e) => {
+    e.ondragstart = () => {
+      from = e.dataset.tile;
+      e.classList.add('drag');
+    };
+    e.ondragend = () => {
+      e.classList.remove('drag');
+      document.querySelectorAll('.over').forEach((x) => x.classList.remove('over'));
+    };
+    e.ondragover = (x) => {
+      x.preventDefault();
+      if (e.dataset.tile !== from) e.classList.add('over');
+    };
+    e.ondragleave = () => e.classList.remove('over');
+    e.ondrop = (x) => {
+      x.preventDefault();
+      const to = e.dataset.tile;
+      const tiles = page().tiles;
+      const i = tiles.findIndex((tile) => tile.id === from);
+      const j = tiles.findIndex((tile) => tile.id === to);
+      if (i < 0 || j < 0 || i === j) return;
+      const [moved] = tiles.splice(i, 1);
+      tiles.splice(j, 0, moved);
+      saveLayout();
+      render();
+    };
+  });
+}
+
+function applyIncomingState(d) {
+  if (!d) return;
+  S.online = true;
+  Object.assign(S.controls, d.controls || {});
+  S.telemetry = d.telemetry || S.telemetry;
+  S.components = d.components || {};
+  render();
+}
+
+function simulateTelemetry() {
+  S.online = false;
+  S.telemetry.cpu.usage = Math.max(5, Math.min(95, S.telemetry.cpu.usage + Math.round((Math.random() - 0.5) * 7)));
+  S.telemetry.gpu.usage = Math.max(5, Math.min(99, S.telemetry.gpu.usage + Math.round((Math.random() - 0.5) * 9)));
+  render();
+}
+
+async function bootstrapConfig() {
+  const config = await A.config();
+  S.pairingRequired = !!config?.pairingRequired;
+  const defs = await A.components();
+  if (defs) {
+    S.componentDefs = defs;
+    S.components = Object.fromEntries(defs.map((d) => [d.id, d.state]));
+  }
+}
+
+async function pairDevice() {
+  const code = window.prompt('Enter the 6-digit pairing code from the host PC:');
+  if (!code) return;
+  const result = await A.pair(code);
+  if (!result?.token) {
+    toast('Pairing failed');
+    return;
+  }
+  S.token = result.token;
+  localStorage.setItem(STORAGE_TOKEN, S.token);
+  toast('Paired');
+  render();
+}
+
+function startSse() {
+  if (!window.EventSource) return false;
+  try {
+    const source = new EventSource('api/events');
+    source.onmessage = (event) => {
+      try {
+        applyIncomingState(JSON.parse(event.data));
+      } catch {
+        // ignored
+      }
+    };
+    source.onerror = () => {
+      source.close();
+      startPolling();
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pollOnce() {
+  const d = await A.state();
+  if (d) applyIncomingState(d);
+  else simulateTelemetry();
+}
+
+function startPolling() {
+  pollOnce();
+  setInterval(pollOnce, 2200);
+}
+
+render();
+bootstrapConfig().then(async () => {
+  await pollOnce();
+  if (!startSse()) startPolling();
+});
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
