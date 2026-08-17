@@ -127,7 +127,7 @@ app.MapPost("/api/control/{id}", async (HttpContext http, string id, ControlComm
             var result = await windows.SetBrightnessAsync(value);
             engine.SetState(id, result.Success ? value : null, result.Success, result.Success ? null : result.Message);
             await hub.Clients.All.SendAsync("componentChanged", engine.GetStates());
-            return Results.Ok(new { success = result.Success, id, value = result.Success ? value : null, error = result.Success ? null : result.Message });
+            return Results.Ok(new { success = result.Success, id, value = result.Success ? (double?)value : null, error = result.Success ? null : result.Message });
         }
         default:
         {

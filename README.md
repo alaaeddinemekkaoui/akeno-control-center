@@ -33,7 +33,7 @@ A curated AKENO monitoring view for PC performance, audio, network and stream st
 - Range values as sliders or +/- buttons
 - Toggles and action tiles
 - Shared state with Dashboard
-- Browser-local layout persistence
+- SQLite-backed layout persistence
 - Responsive iPhone layout
 - PWA support
 
@@ -70,6 +70,28 @@ http://YOUR-PC-IP:5077
 
 The server listens on `0.0.0.0:5077` by default.
 
+## API surface (host backend)
+
+- `GET /api/health`
+- `GET /api/config`
+- `GET /api/state`
+- `GET /api/components`
+- `GET /api/components/{id}`
+- `POST /api/control/{id}`
+- `POST /api/action/{id}`
+- `GET /api/pages`
+- `POST /api/pages`
+- `PUT /api/pages/{id}`
+- `DELETE /api/pages/{id}`
+- `GET /api/layout`
+- `PUT /api/layout`
+- `GET /api/settings`
+- `PUT /api/settings`
+- `POST /api/pair`
+- `GET /api/clients`
+
+Live updates are available through SignalR (`/hubs/control`) and SSE (`/api/events`).
+
 ## Optional pairing protection
 
 For easy development, LAN writes are open by default. To require a pairing token before control commands:
@@ -79,7 +101,7 @@ $env:AKENO_REQUIRE_PAIRING="true"
 ./run-windows.ps1
 ```
 
-The host prints a six-digit pairing code. The pairing API exchanges that code for a temporary token. Before exposing the PC host outside your LAN, pairing/authentication must be enabled and the host should be placed behind a secure VPN/tunnel rather than directly port-forwarded.
+The host prints a six-digit pairing code. The pairing API exchanges that code for a temporary token stored in SQLite with device metadata and expiry. Before exposing the PC host outside your LAN, pairing/authentication must be enabled and the host should be placed behind a secure VPN/tunnel rather than directly port-forwarded.
 
 ## Public web demo
 
@@ -90,9 +112,16 @@ GitHub Pages deploys the static interface from `src/Akeno.Host/wwwroot`. The pub
 ```text
 src/Akeno.Host/
   Program.cs
+  Hubs/
+    ControlHub.cs
   Models/
+    ComponentModels.cs
   Services/
-    ControlState.cs
+    ComponentEngineService.cs
+    DeckLayoutService.cs
+    SettingsService.cs
+    AkenoDbService.cs
+    StateBroadcastWorker.cs
     WindowsAudioService.cs
     HardwareMonitorService.cs
     WindowsControlService.cs
