@@ -1,34 +1,45 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Akeno.Host.Services;
 
 public sealed class PairingService
 {
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _tokens = new();
+    private readonly AkenoDbService _db;
+
+    public PairingService(AkenoDbService db)
+    {
+        _db = db;
+    }
+
     public string PairingCode { get; } = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
 
-    public string CreateToken(string code)
+    public async Task<string> CreateTokenAsync(string code, string? deviceName, CancellationToken cancellationToken = default)
     {
-        if (!CryptographicOperations.FixedTimeEquals(
-                System.Text.Encoding.UTF8.GetBytes(code.PadLeft(6, '0')),
-                System.Text.Encoding.UTF8.GetBytes(PairingCode)))
+        var normalizedCode = (code ?? string.Empty).Trim().PadLeft(6, '0');
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(normalizedCode), Encoding.UTF8.GetBytes(PairingCode)))
+        {
             throw new UnauthorizedAccessException("Invalid pairing code.");
+        }
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        _tokens[token] = DateTimeOffset.UtcNow.AddDays(30);
+        await _db.UpsertClientTokenAsync(token, string.IsNullOrWhiteSpace(deviceName) ? "Unknown device" : deviceName.Trim(), DateTimeOffset.UtcNow.AddDays(30), cancellationToken);
         return token;
     }
 
-    public bool IsValid(string? token)
+    public async Task<bool> IsValidAsync(string? token, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return false;
-        if (!_tokens.TryGetValue(token, out var expires)) return false;
-        if (expires <= DateTimeOffset.UtcNow)
+        var isValid = await _db.IsTokenValidAsync(token, cancellationToken);
+        if (isValid)
         {
-            _tokens.TryRemove(token, out _);
-            return false;
+            await _db.TouchClientAsync(token, cancellationToken);
         }
-        return true;
+
+        return isValid;
     }
+
+    public Task<IReadOnlyList<PairedClient>> GetClientsAsync(CancellationToken cancellationToken = default) => _db.GetClientsAsync(cancellationToken);
+
+    public Task RevokeAsync(string token, CancellationToken cancellationToken = default) => _db.RevokeClientAsync(token, cancellationToken);
 }

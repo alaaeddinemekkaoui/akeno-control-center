@@ -8,8 +8,28 @@ public sealed class WindowsControlService
     {
         if (!OperatingSystem.IsWindows()) return new(false, "Brightness control requires Windows.");
         var v = (int)Math.Clamp(Math.Round(value), 0, 100);
-        var command = $"$m=Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop; $m.WmiSetBrightness(1,{v}) | Out-Null";
+        var command = "$m=Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop; if(-not $m){ throw 'No internal monitor brightness support detected.' }; $m.WmiSetBrightness(1," + v + ") | Out-Null";
         return await RunAsync("powershell.exe", $"-NoProfile -NonInteractive -Command \"{command}\"");
+    }
+
+    public async Task<(bool Available, double? Value, string? Error)> TryReadBrightnessAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return (false, null, "Brightness control requires Windows.");
+        var command = "try { $b=Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop | Select-Object -First 1 -ExpandProperty CurrentBrightness; if($null -eq $b){ Write-Output 'UNAVAILABLE' } else { Write-Output $b } } catch { Write-Output 'UNAVAILABLE' }";
+        var result = await RunAsync("powershell.exe", $"-NoProfile -NonInteractive -Command \"{command}\"");
+        if (!result.Success || string.IsNullOrWhiteSpace(result.Output))
+        {
+            return (false, null, "Brightness control is not supported on this monitor.");
+        }
+
+        if (result.Output.Trim().Equals("UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null, "Brightness control is not supported on this monitor.");
+        }
+
+        return double.TryParse(result.Output.Trim(), out var value)
+            ? (true, Math.Clamp(value, 0, 100), null)
+            : (false, null, "Brightness control is not supported on this monitor.");
     }
 
     public async Task<ControlExecutionResult> RunActionAsync(string action)
@@ -37,20 +57,29 @@ public sealed class WindowsControlService
                     Arguments = arguments,
                     CreateNoWindow = true,
                     UseShellExecute = false,
+                    RedirectStandardOutput = true,
                     RedirectStandardError = true
                 }
             };
             process.Start();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-            var error = await errorTask;
-            return process.ExitCode == 0 ? new(true, "OK") : new(false, string.IsNullOrWhiteSpace(error) ? $"Exit code {process.ExitCode}" : error.Trim());
+            var output = (await outputTask).Trim();
+            var error = (await errorTask).Trim();
+
+            if (process.ExitCode == 0)
+            {
+                return new(true, "OK", output);
+            }
+
+            return new(false, string.IsNullOrWhiteSpace(error) ? $"Exit code {process.ExitCode}" : error, output);
         }
         catch (Exception ex)
         {
-            return new(false, ex.Message);
+            return new(false, ex.Message, null);
         }
     }
 }
 
-public sealed record ControlExecutionResult(bool Success, string Message);
+public sealed record ControlExecutionResult(bool Success, string Message, string? Output = null);
